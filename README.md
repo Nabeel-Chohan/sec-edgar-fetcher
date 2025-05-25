@@ -1,7 +1,3 @@
-Great! A well-written `README.md` is essential — it’s the first thing people see when they visit your GitHub repository. Here's a complete and professional **README** for your `sec-edgar-fetcher` project, tailored for clarity and accessibility:
-
----
-
 ## 📄 sec-edgar-fetcher
 
 A Python tool to fetch and display company information and financial facts from the SEC EDGAR API using a company's Central Index Key (CIK).
