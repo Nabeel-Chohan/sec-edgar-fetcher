@@ -15,9 +15,25 @@ headers = {
    "Connection": "keep-alive",
 }
 
-# PROMPT FOR CIK
-# Define the CIK and API URLs
-cik = input("Please enter the CIK code of the company (e.g., 0000789019 for Microsoft): ")
+# In a real-world scenario, this data should be fetched from https://www.sec.gov/files/company_tickers.json
+COMPANY_TICKERS = {
+    "MSFT": "0000789019",
+    "AAPL": "0000320193",
+    "GOOGL": "0001652044",
+    "AMZN": "0001018724",
+    "TSLA": "0001318605",
+}
+
+# PROMPT FOR TICKER
+ticker = input("Please enter the ticker symbol of the company (e.g., MSFT for Microsoft): ").upper()
+
+# GET CIK FROM TICKER
+cik = COMPANY_TICKERS.get(ticker)
+
+if not cik:
+    print(f"Ticker symbol {ticker} not found.")
+    exit()
+
 # Ensure CIK is zero-padded to 10 digits as required by SEC API for some endpoints
 cik = cik.zfill(10)
 
