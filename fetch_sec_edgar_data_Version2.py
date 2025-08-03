@@ -1,4 +1,5 @@
 import requests
+import csv
 from datetime import datetime
 
 def get_cik_from_ticker(ticker_symbol, headers):
@@ -54,89 +55,92 @@ if not cik:
 url_entity = f"https://data.sec.gov/submissions/CIK{cik}.json"
 url_facts = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
 
-# Fetch entity data
+# Fetch and process entity data
 response_entity = requests.get(url_entity, headers=headers)
 if response_entity.status_code == 200:
     entity_data = response_entity.json()
 
-    entity_info = {
+    # Flatten the address data for CSV
+    mailing_address = entity_data.get("addresses", {}).get("mailing", {})
+    business_address = entity_data.get("addresses", {}).get("business", {})
+
+    entity_info_flat = {
         "CIK": entity_data.get("cik"),
         "Entity Name": entity_data.get("name"),
-        "Mailing Address": entity_data.get("addresses", {}).get("mailing", {}),
-        "Business Address": entity_data.get("addresses", {}).get("business", {}),
+        "Mailing Street 1": mailing_address.get('street1', 'N/A'),
+        "Mailing City": mailing_address.get('city', 'N/A'),
+        "Mailing State/Country": mailing_address.get('stateOrCountry', 'N/A'),
+        "Mailing ZIP Code": mailing_address.get('zipCode', 'N/A'),
+        "Business Street 1": business_address.get('street1', 'N/A'),
+        "Business City": business_address.get('city', 'N/A'),
+        "Business State/Country": business_address.get('stateOrCountry', 'N/A'),
+        "Business ZIP Code": business_address.get('zipCode', 'N/A'),
         "State of Incorporation": entity_data.get("stateOfIncorporation", ""),
         "EntityType": entity_data.get("entityType", "")
     }
 
     print("\n" + "=" * 40)
     print("Entity Information:")
-    print("-" * 30)
-    print(f"CIK: {entity_info['CIK']}")
-    print(f"Entity Name: {entity_info['Entity Name']}")
-
-    mailing = entity_info['Mailing Address']
-    print("\nMailing Address:")
-    print(f"  Street: {mailing.get('street1', 'N/A')}")
-    print(f"  City: {mailing.get('city', 'N/A')}")
-    print(f"  State/Country: {mailing.get('stateOrCountry', 'N/A')}")
-    print(f"  ZIP Code: {mailing.get('zipCode', 'N/A')}")
-
-    business = entity_info['Business Address']
-    print("\nBusiness Address:")
-    print(f"  Street: {business.get('street1', 'N/A')}")
-    print(f"  City: {business.get('city', 'N/A')}")
-    print(f"  State/Country: {business.get('stateOrCountry', 'N/A')}")
-    print(f"  ZIP Code: {business.get('zipCode', 'N/A')}")
-
-    print(f"\nState of Incorporation: {entity_info['State of Incorporation']}")
-    print(f"Entity Type: {entity_info['EntityType']}")
+    for key, value in entity_info_flat.items():
+        print(f"  {key}: {value}")
     print("=" * 40)
+
+    # Write entity info to CSV
+    entity_csv_file = 'entity_information.csv'
+    try:
+        with open(entity_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=entity_info_flat.keys())
+            writer.writeheader()
+            writer.writerow(entity_info_flat)
+        print(f"Entity information successfully written to {entity_csv_file}")
+    except IOError as e:
+        print(f"Error writing entity information to CSV: {e}")
+
 else:
     print(f"Failed to fetch entity data for CIK {cik}. HTTP Status Code: {response_entity.status_code}")
     exit()
 
-# Fetch financial facts data
+# Fetch and process financial facts data
 response_facts = requests.get(url_facts, headers=headers)
 if response_facts.status_code == 200:
     facts_data = response_facts.json()
     facts = facts_data.get("facts", {})
 
-    current_year = str(datetime.now().year)
-    most_recent_concepts_current_year = {}
+    all_financial_facts = []
 
     for taxonomy, concepts in facts.items():
         for concept, details in concepts.items():
             for unit, values in details.get("units", {}).items():
-                values_current_year = [v for v in values if v["filed"].startswith(current_year)]
-                if values_current_year:
-                    recent = sorted(values_current_year, key=lambda x: x["filed"], reverse=True)[0]
-                    most_recent_concepts_current_year[concept] = {
-                        "taxonomy": taxonomy,
-                        "value": recent["val"],
-                        "filing_date": recent["filed"],
-                        "end_date": recent["end"],
-                        "unit": unit,
-                        "fiscal_period": recent.get("fp", "N/A"),
-                        "form_type": recent.get("form", "N/A"),
-                        "accession_number": recent["accn"]
-                    }
+                for fact in values:
+                    all_financial_facts.append({
+                        "Concept": concept,
+                        "Taxonomy": taxonomy,
+                        "Value": fact["val"],
+                        "Filing Date": fact["filed"],
+                        "End Date": fact["end"],
+                        "Unit": unit,
+                        "Fiscal Period": fact.get("fp", "N/A"),
+                        "Form Type": fact.get("form", "N/A"),
+                        "Accession Number": fact["accn"]
+                    })
 
-    print("\n" + "=" * 40)
-    print(f"Most Recent Filed Concepts for {entity_info['Entity Name']} (Current Year Only):")
-    print("-" * 30)
-    if most_recent_concepts_current_year:
-        for concept, details in most_recent_concepts_current_year.items():
-            print(f"\nConcept: {concept}")
-            print(f"  Taxonomy: {details['taxonomy']}")
-            print(f"  Value: {details['value']}")
-            print(f"  Filing Date: {details['filing_date']}")
-            print(f"  End Date: {details['end_date']}")
-            print(f"  Unit: {details['unit']}")
-            print(f"  Fiscal Period: {details['fiscal_period']}")
-            print(f"  Form Type: {details['form_type']}")
-            print(f"  Accession Number: {details['accession_number']}")
+    print(f"\nExtracted {len(all_financial_facts)} financial facts.")
+
+    # Write financial facts to CSV
+    if all_financial_facts:
+        facts_csv_file = 'financial_facts.csv'
+        try:
+            # Use the keys from the first dictionary as headers
+            fieldnames = all_financial_facts[0].keys()
+            with open(facts_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(all_financial_facts)
+            print(f"Financial facts successfully written to {facts_csv_file}")
+        except IOError as e:
+            print(f"Error writing financial facts to CSV: {e}")
     else:
-        print("No financial facts found for the current year.")
-    print("=" * 40)
+        print("No financial facts to write to CSV.")
+
 else:
     print(f"Failed to fetch financial facts for CIK {cik}. HTTP Status Code: {response_facts.status_code}")
