@@ -1,38 +1,28 @@
 import requests
 import csv
 from datetime import datetime
+import pandas as pd
 
 def get_cik_from_ticker(ticker_symbol, headers):
-    """
-    Retrieves the CIK number for a given ticker symbol from the SEC's company_tickers.json file.
-    """
     sec_tickers_url = "https://www.sec.gov/files/company_tickers.json"
-
     try:
         print(f"Fetching CIK for ticker '{ticker_symbol}' from: {sec_tickers_url}")
         response = requests.get(sec_tickers_url, headers=headers)
         response.raise_for_status()
-
         ticker_data = response.json()
-        print("Ticker data fetched successfully.\n")
-
         ticker_symbol = ticker_symbol.upper()
-
         for item in ticker_data.values():
             if item["ticker"].upper() == ticker_symbol:
                 return str(item["cik_str"]).zfill(10)
-
         return None
-
     except requests.exceptions.RequestException as e:
         print(f"Error fetching ticker data: {e}")
         return None
 
-# --- Agent Information Prompt ---
+# --- User Input ---
 user_name = input("Please enter your Name (e.g., John Doe): ")
 user_email = input("Please enter your Email (e.g., john.doe@example.com): ")
 
-# ✅ Updated headers block
 headers = {
     "User-Agent": f"{user_name} ({user_email})",
     "Accept-Encoding": "gzip, deflate",
@@ -41,29 +31,20 @@ headers = {
     "Referer": "https://www.sec.gov"
 }
 
-# Prompt for ticker
 ticker = input("Please enter the ticker symbol of the company (e.g., MSFT for Microsoft): ").strip().upper()
-
-# Dynamically fetch the CIK
 cik = get_cik_from_ticker(ticker, headers)
 
 if not cik:
     print(f"Ticker symbol '{ticker}' not found.")
     exit()
 
-# SEC API endpoints
+# --- Fetch Entity Info ---
 url_entity = f"https://data.sec.gov/submissions/CIK{cik}.json"
-url_facts = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
-
-# Fetch and process entity data
 response_entity = requests.get(url_entity, headers=headers)
 if response_entity.status_code == 200:
     entity_data = response_entity.json()
-
-    # Flatten the address data for CSV
     mailing_address = entity_data.get("addresses", {}).get("mailing", {})
     business_address = entity_data.get("addresses", {}).get("business", {})
-
     entity_info_flat = {
         "CIK": entity_data.get("cik"),
         "Entity Name": entity_data.get("name"),
@@ -85,22 +66,19 @@ if response_entity.status_code == 200:
         print(f"  {key}: {value}")
     print("=" * 40)
 
-    # Write entity info to CSV
+    # Save entity info
     entity_csv_file = 'entity_information.csv'
-    try:
-        with open(entity_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=entity_info_flat.keys())
-            writer.writeheader()
-            writer.writerow(entity_info_flat)
-        print(f"Entity information successfully written to {entity_csv_file}")
-    except IOError as e:
-        print(f"Error writing entity information to CSV: {e}")
-
+    with open(entity_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=entity_info_flat.keys())
+        writer.writeheader()
+        writer.writerow(entity_info_flat)
+    print(f"Entity information written to {entity_csv_file}")
 else:
-    print(f"Failed to fetch entity data for CIK {cik}. HTTP Status Code: {response_entity.status_code}")
+    print(f"Failed to fetch entity data. Status: {response_entity.status_code}")
     exit()
 
-# Fetch and process financial facts data
+# --- Fetch Financial Facts ---
+url_facts = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
 response_facts = requests.get(url_facts, headers=headers)
 if response_facts.status_code == 200:
     facts_data = response_facts.json()
@@ -126,21 +104,27 @@ if response_facts.status_code == 200:
 
     print(f"\nExtracted {len(all_financial_facts)} financial facts.")
 
-    # Write financial facts to CSV
     if all_financial_facts:
         facts_csv_file = 'financial_facts.csv'
-        try:
-            # Use the keys from the first dictionary as headers
-            fieldnames = all_financial_facts[0].keys()
-            with open(facts_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(all_financial_facts)
-            print(f"Financial facts successfully written to {facts_csv_file}")
-        except IOError as e:
-            print(f"Error writing financial facts to CSV: {e}")
-    else:
-        print("No financial facts to write to CSV.")
+        fieldnames = all_financial_facts[0].keys()
+        with open(facts_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(all_financial_facts)
+        print(f"Raw financial facts written to {facts_csv_file}")
 
+        # ✅ Filter only the latest facts
+        df = pd.DataFrame(all_financial_facts)
+        df['Filing Date'] = pd.to_datetime(df['Filing Date'])
+        df['End Date'] = pd.to_datetime(df['End Date'])
+        df_sorted = df.sort_values(by='Filing Date', ascending=False)
+        df_latest = df_sorted.drop_duplicates(subset=['Concept', 'End Date'], keep='first')
+
+        filtered_csv_file = 'financial_facts_latest.csv'
+        df_latest.to_csv(filtered_csv_file, index=False)
+        print(f"Filtered (latest) financial facts written to {filtered_csv_file}")
+
+    else:
+        print("No financial facts to process.")
 else:
-    print(f"Failed to fetch financial facts for CIK {cik}. HTTP Status Code: {response_facts.status_code}")
+    print(f"Failed to fetch financial facts. Status: {response_facts.status_code}")
